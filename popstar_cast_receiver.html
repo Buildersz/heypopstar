@@ -26,6 +26,7 @@
       color: white;
       font-family: sans-serif;
       background: #0A0A0F;
+      z-index: 1;
     }
     #idle-screen h1 {
       background: linear-gradient(90deg, #FF2E92, #3EC1FF);
@@ -34,7 +35,7 @@
       font-size: 64px;
     }
   </style>
-  <script src="//www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver_framework.js"></script>
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/3.0.0/cast_receiver_framework.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
 </head>
 <body>
@@ -49,7 +50,6 @@
     let playerReady = false;
     let pendingVideoId = null;
 
-    // Called automatically by the YouTube IFrame API once it loads
     function onYouTubeIframeAPIReady() {
       ytPlayer = new YT.Player('player', {
         height: '100%',
@@ -81,18 +81,23 @@
       }
     }
 
-    // Set up the Cast Receiver context and listen for custom messages
+    // Standard Cast Application Framework (CAF) receiver setup
     const context = cast.framework.CastReceiverContext.getInstance();
-    const NAMESPACE = 'urn:x-cast:com.popstar.cast';
+    const playerManager = context.getPlayerManager();
 
-    context.addCustomMessageListener(NAMESPACE, (event) => {
-      const data = event.data;
-      if (data && data.videoId) {
-        playVideo(data.videoId);
+    // Intercept LOAD requests: we repurpose contentId to carry the YouTube video ID
+    // (since our "media" isn't a direct file URL, it's a YouTube video to embed)
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      (loadRequestData) => {
+        const videoId = loadRequestData.media.contentId;
+        playVideo(videoId);
+        return loadRequestData;
       }
-    });
+    );
 
     const options = new cast.framework.CastReceiverOptions();
+    options.disableIdleTimeout = true;
     context.start(options);
   </script>
 </body>
