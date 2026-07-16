@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Popstar Cast Receiver</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #0A0A0F;
+      overflow: hidden;
+    }
+    #player {
+      width: 100%;
+      height: 100%;
+    }
+    #idle-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      color: white;
+      font-family: sans-serif;
+      background: #0A0A0F;
+    }
+    #idle-screen h1 {
+      background: linear-gradient(90deg, #FF2E92, #3EC1FF);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-size: 64px;
+    }
+  </style>
+  <script src="//www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver_framework.js"></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
+</head>
+<body>
+  <div id="idle-screen">
+    <h1>Popstar</h1>
+    <p>Waiting for a song...</p>
+  </div>
+  <div id="player" style="display:none;"></div>
+
+  <script>
+    let ytPlayer = null;
+    let playerReady = false;
+    let pendingVideoId = null;
+
+    // Called automatically by the YouTube IFrame API once it loads
+    function onYouTubeIframeAPIReady() {
+      ytPlayer = new YT.Player('player', {
+        height: '100%',
+        width: '100%',
+        playerVars: {
+          autoplay: 1,
+          controls: 0,
+          rel: 0,
+        },
+        events: {
+          onReady: () => {
+            playerReady = true;
+            if (pendingVideoId) {
+              playVideo(pendingVideoId);
+              pendingVideoId = null;
+            }
+          },
+        },
+      });
+    }
+
+    function playVideo(videoId) {
+      document.getElementById('idle-screen').style.display = 'none';
+      document.getElementById('player').style.display = 'block';
+      if (playerReady && ytPlayer) {
+        ytPlayer.loadVideoById(videoId);
+      } else {
+        pendingVideoId = videoId;
+      }
+    }
+
+    // Set up the Cast Receiver context and listen for custom messages
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const NAMESPACE = 'urn:x-cast:com.popstar.cast';
+
+    context.addCustomMessageListener(NAMESPACE, (event) => {
+      const data = event.data;
+      if (data && data.videoId) {
+        playVideo(data.videoId);
+      }
+    });
+
+    const options = new cast.framework.CastReceiverOptions();
+    context.start(options);
+  </script>
+</body>
+</html>
