@@ -81,12 +81,9 @@
       }
     }
 
-    // Standard Cast Application Framework (CAF) receiver setup
     const context = cast.framework.CastReceiverContext.getInstance();
     const playerManager = context.getPlayerManager();
 
-    // Intercept LOAD requests: we repurpose contentId to carry the YouTube video ID
-    // (since our "media" isn't a direct file URL, it's a YouTube video to embed)
     playerManager.setMessageInterceptor(
       cast.framework.messages.MessageType.LOAD,
       (loadRequestData) => {
