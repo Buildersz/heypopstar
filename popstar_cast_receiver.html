@@ -48,8 +48,9 @@
   <script>
     let ytPlayer = null;
     let playerReady = false;
-    let pendingVideoId = null;
+    let pendingLoad = null;
     let playerManager = null;
+    let currentMediaInfo = null;
 
     function onYouTubeIframeAPIReady() {
       ytPlayer = new YT.Player('player', {
@@ -63,9 +64,9 @@
         events: {
           onReady: () => {
             playerReady = true;
-            if (pendingVideoId) {
-              playVideo(pendingVideoId);
-              pendingVideoId = null;
+            if (pendingLoad) {
+              playVideo(pendingLoad.videoId, pendingLoad.title);
+              pendingLoad = null;
             }
           },
           onStateChange: onPlayerStateChange,
@@ -73,13 +74,25 @@
       });
     }
 
-    // The Cast framework's own playerManager has no visibility into our
-    // custom YouTube IFrame player, since we intercept and cancel its
-    // default media handling. We need to manually broadcast status
-    // whenever the actual YouTube player's state changes, so the sender
-    // (the Flutter app) can find out what's really happening.
+    // Register real media info with playerManager once we know the video's
+    // actual duration - this gives playerManager genuine data to track,
+    // instead of it being permanently stuck at "loading" with no real
+    // media session ever registered.
+    function registerMediaWithPlayerManager(videoId, title, durationSeconds) {
+      const mediaInfo = new cast.framework.messages.MediaInformation();
+      mediaInfo.contentId = videoId;
+      mediaInfo.contentType = 'video/youtube';
+      mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
+      mediaInfo.duration = durationSeconds;
+      mediaInfo.metadata = new cast.framework.messages.MovieMediaMetadata();
+      mediaInfo.metadata.title = title || 'Popstar';
+
+      currentMediaInfo = mediaInfo;
+      playerManager.setMediaInformation(mediaInfo, true);
+    }
+
     function onPlayerStateChange(event) {
-      if (!playerManager) return;
+      if (!playerManager || !currentMediaInfo) return;
 
       if (event.data === YT.PlayerState.PLAYING) {
         playerManager.broadcastStatus(true);
@@ -90,13 +103,24 @@
       }
     }
 
-    function playVideo(videoId) {
+    function playVideo(videoId, title) {
       document.getElementById('idle-screen').style.display = 'none';
       document.getElementById('player').style.display = 'block';
+
       if (playerReady && ytPlayer) {
         ytPlayer.loadVideoById(videoId);
+
+        // Wait briefly for YouTube to report the real video duration,
+        // then register it with playerManager so it has accurate info
+        const checkDuration = setInterval(() => {
+          const duration = ytPlayer.getDuration();
+          if (duration && duration > 0) {
+            clearInterval(checkDuration);
+            registerMediaWithPlayerManager(videoId, title, duration);
+          }
+        }, 300);
       } else {
-        pendingVideoId = videoId;
+        pendingLoad = { videoId, title };
       }
     }
 
@@ -107,7 +131,8 @@
       cast.framework.messages.MessageType.LOAD,
       (loadRequestData) => {
         const videoId = loadRequestData.media.contentId;
-        playVideo(videoId);
+        const title = loadRequestData.media.metadata && loadRequestData.media.metadata.title;
+        playVideo(videoId, title);
         return null;
       }
     );
