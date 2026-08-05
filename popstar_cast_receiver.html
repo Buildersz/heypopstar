@@ -34,6 +34,21 @@
       -webkit-text-fill-color: transparent;
       font-size: 64px;
     }
+    #debug-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.85);
+      color: #0F0;
+      font-family: monospace;
+      font-size: 16px;
+      padding: 10px;
+      max-height: 40%;
+      overflow-y: auto;
+      z-index: 999;
+      white-space: pre-wrap;
+    }
   </style>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
@@ -44,6 +59,7 @@
     <p>Waiting for a song...</p>
   </div>
   <div id="player" style="display:none;"></div>
+  <div id="debug-overlay"></div>
 
   <script>
     let ytPlayer = null;
@@ -52,7 +68,20 @@
     let playerManager = null;
     let currentMediaInfo = null;
 
+    function debugLog(msg) {
+      const el = document.getElementById('debug-overlay');
+      const time = new Date().toLocaleTimeString();
+      el.textContent += `[${time}] ${msg}\n`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // Catch any uncaught errors and show them directly on screen
+    window.onerror = function(message, source, lineno, colno, error) {
+      debugLog(`JS ERROR: ${message} (line ${lineno})`);
+    };
+
     function onYouTubeIframeAPIReady() {
+      debugLog('YouTube API ready');
       ytPlayer = new YT.Player('player', {
         height: '100%',
         width: '100%',
@@ -63,6 +92,7 @@
         },
         events: {
           onReady: () => {
+            debugLog('YT player onReady fired');
             playerReady = true;
             if (pendingLoad) {
               playVideo(pendingLoad.videoId, pendingLoad.title);
@@ -70,76 +100,101 @@
             }
           },
           onStateChange: onPlayerStateChange,
+          onError: (e) => debugLog('YT player onError: ' + JSON.stringify(e.data)),
         },
       });
     }
 
-    // Register real media info with playerManager once we know the video's
-    // actual duration - this gives playerManager genuine data to track,
-    // instead of it being permanently stuck at "loading" with no real
-    // media session ever registered.
     function registerMediaWithPlayerManager(videoId, title, durationSeconds) {
-      const mediaInfo = new cast.framework.messages.MediaInformation();
-      mediaInfo.contentId = videoId;
-      mediaInfo.contentType = 'video/youtube';
-      mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
-      mediaInfo.duration = durationSeconds;
-      mediaInfo.metadata = new cast.framework.messages.MovieMediaMetadata();
-      mediaInfo.metadata.title = title || 'Popstar';
+      debugLog(`Registering media: duration=${durationSeconds}s`);
+      try {
+        const mediaInfo = new cast.framework.messages.MediaInformation();
+        mediaInfo.contentId = videoId;
+        mediaInfo.contentType = 'video/youtube';
+        mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
+        mediaInfo.duration = durationSeconds;
+        mediaInfo.metadata = new cast.framework.messages.MovieMediaMetadata();
+        mediaInfo.metadata.title = title || 'Popstar';
 
-      currentMediaInfo = mediaInfo;
-      playerManager.setMediaInformation(mediaInfo, true);
+        currentMediaInfo = mediaInfo;
+        playerManager.setMediaInformation(mediaInfo, true);
+        debugLog('setMediaInformation call succeeded');
+      } catch (e) {
+        debugLog('setMediaInformation ERROR: ' + e.message);
+      }
     }
 
     function onPlayerStateChange(event) {
-      if (!playerManager || !currentMediaInfo) return;
+      const stateNames = {'-1': 'UNSTARTED', 0: 'ENDED', 1: 'PLAYING', 2: 'PAUSED', 3: 'BUFFERING', 5: 'CUED'};
+      debugLog('YT state changed: ' + (stateNames[event.data] || event.data));
+
+      if (!playerManager || !currentMediaInfo) {
+        debugLog('Skipping broadcast - playerManager or currentMediaInfo not ready');
+        return;
+      }
 
       if (event.data === YT.PlayerState.PLAYING) {
         playerManager.broadcastStatus(true);
+        debugLog('Broadcast sent (PLAYING)');
       } else if (event.data === YT.PlayerState.PAUSED) {
         playerManager.broadcastStatus(true);
+        debugLog('Broadcast sent (PAUSED)');
       } else if (event.data === YT.PlayerState.ENDED) {
         playerManager.broadcastStatus(true);
+        debugLog('Broadcast sent (ENDED)');
       }
     }
 
     function playVideo(videoId, title) {
+      debugLog('playVideo called: ' + videoId);
       document.getElementById('idle-screen').style.display = 'none';
       document.getElementById('player').style.display = 'block';
 
       if (playerReady && ytPlayer) {
         ytPlayer.loadVideoById(videoId);
+        debugLog('loadVideoById called');
 
-        // Wait briefly for YouTube to report the real video duration,
-        // then register it with playerManager so it has accurate info
+        let attempts = 0;
         const checkDuration = setInterval(() => {
-          const duration = ytPlayer.getDuration();
+          attempts++;
+          const duration = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
           if (duration && duration > 0) {
             clearInterval(checkDuration);
             registerMediaWithPlayerManager(videoId, title, duration);
+          } else if (attempts > 20) {
+            clearInterval(checkDuration);
+            debugLog('Gave up waiting for duration after 20 attempts');
           }
         }, 300);
       } else {
+        debugLog('Player not ready yet, queuing load');
         pendingLoad = { videoId, title };
       }
     }
 
-    const context = cast.framework.CastReceiverContext.getInstance();
-    playerManager = context.getPlayerManager();
+    try {
+      const context = cast.framework.CastReceiverContext.getInstance();
+      playerManager = context.getPlayerManager();
+      debugLog('CastReceiverContext initialized');
 
-    playerManager.setMessageInterceptor(
-      cast.framework.messages.MessageType.LOAD,
-      (loadRequestData) => {
-        const videoId = loadRequestData.media.contentId;
-        const title = loadRequestData.media.metadata && loadRequestData.media.metadata.title;
-        playVideo(videoId, title);
-        return null;
-      }
-    );
+      playerManager.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD,
+        (loadRequestData) => {
+          debugLog('LOAD message received');
+          const videoId = loadRequestData.media.contentId;
+          const title = loadRequestData.media.metadata && loadRequestData.media.metadata.title;
+          playVideo(videoId, title);
+          return null;
+        }
+      );
 
-    const options = new cast.framework.CastReceiverOptions();
-    options.disableIdleTimeout = true;
-    context.start(options);
+      const options = new cast.framework.CastReceiverOptions();
+      options.disableIdleTimeout = true;
+      context.start(options);
+      debugLog('context.start() called');
+    } catch (e) {
+      debugLog('INIT ERROR: ' + e.message);
+    }
   </script>
 </body>
 </html>
