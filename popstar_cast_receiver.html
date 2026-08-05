@@ -67,6 +67,9 @@
     let pendingLoad = null;
     let playerManager = null;
     let currentMediaInfo = null;
+    let currentVideoId = null;
+    let currentTitle = null;
+    let mediaRegisteredForVideo = null;
 
     function debugLog(msg) {
       const el = document.getElementById('debug-overlay');
@@ -75,7 +78,6 @@
       el.scrollTop = el.scrollHeight;
     }
 
-    // Catch any uncaught errors and show them directly on screen
     window.onerror = function(message, source, lineno, colno, error) {
       debugLog(`JS ERROR: ${message} (line ${lineno})`);
     };
@@ -117,6 +119,7 @@
         mediaInfo.metadata.title = title || 'Popstar';
 
         currentMediaInfo = mediaInfo;
+        mediaRegisteredForVideo = videoId;
         playerManager.setMediaInformation(mediaInfo, true);
         debugLog('setMediaInformation call succeeded');
       } catch (e) {
@@ -128,8 +131,19 @@
       const stateNames = {'-1': 'UNSTARTED', 0: 'ENDED', 1: 'PLAYING', 2: 'PAUSED', 3: 'BUFFERING', 5: 'CUED'};
       debugLog('YT state changed: ' + (stateNames[event.data] || event.data));
 
+      // Register media info the moment we see PLAYING for the first time
+      // for this video, since that's reliably when getDuration() actually
+      // has a real value - polling on a timer gave up too early before
+      if (event.data === YT.PlayerState.PLAYING && mediaRegisteredForVideo !== currentVideoId) {
+        const duration = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
+        debugLog('Duration at PLAYING time: ' + duration);
+        if (duration && duration > 0) {
+          registerMediaWithPlayerManager(currentVideoId, currentTitle, duration);
+        }
+      }
+
       if (!playerManager || !currentMediaInfo) {
-        debugLog('Skipping broadcast - playerManager or currentMediaInfo not ready');
+        debugLog('Skipping broadcast - not registered yet');
         return;
       }
 
@@ -147,25 +161,14 @@
 
     function playVideo(videoId, title) {
       debugLog('playVideo called: ' + videoId);
+      currentVideoId = videoId;
+      currentTitle = title;
       document.getElementById('idle-screen').style.display = 'none';
       document.getElementById('player').style.display = 'block';
 
       if (playerReady && ytPlayer) {
         ytPlayer.loadVideoById(videoId);
         debugLog('loadVideoById called');
-
-        let attempts = 0;
-        const checkDuration = setInterval(() => {
-          attempts++;
-          const duration = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
-          if (duration && duration > 0) {
-            clearInterval(checkDuration);
-            registerMediaWithPlayerManager(videoId, title, duration);
-          } else if (attempts > 20) {
-            clearInterval(checkDuration);
-            debugLog('Gave up waiting for duration after 20 attempts');
-          }
-        }, 300);
       } else {
         debugLog('Player not ready yet, queuing load');
         pendingLoad = { videoId, title };
