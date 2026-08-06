@@ -15,6 +15,8 @@
     #player {
       width: 100%;
       height: 100%;
+      position: relative;
+      z-index: 10;
     }
     #idle-screen {
       position: absolute;
@@ -26,7 +28,7 @@
       color: white;
       font-family: sans-serif;
       background: #0A0A0F;
-      z-index: 1;
+      z-index: 20;
     }
     #idle-screen h1 {
       background: linear-gradient(90deg, #FF2E92, #3EC1FF);
@@ -70,6 +72,13 @@
     let currentVideoId = null;
     let currentTitle = null;
     let mediaRegisteredForVideo = null;
+
+    // A small, real, publicly accessible placeholder video - used only so
+    // CAF's own default player has something valid to "load" and acknowledge,
+    // giving the sender a real session to track. It's never actually shown
+    // or heard - our YouTube IFrame player sits on top of it and does the
+    // real work.
+    const PLACEHOLDER_URL = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
 
     function debugLog(msg) {
       const el = document.getElementById('debug-overlay');
@@ -131,9 +140,6 @@
       const stateNames = {'-1': 'UNSTARTED', 0: 'ENDED', 1: 'PLAYING', 2: 'PAUSED', 3: 'BUFFERING', 5: 'CUED'};
       debugLog('YT state changed: ' + (stateNames[event.data] || event.data));
 
-      // Register media info the moment we see PLAYING for the first time
-      // for this video, since that's reliably when getDuration() actually
-      // has a real value - polling on a timer gave up too early before
       if (event.data === YT.PlayerState.PLAYING && mediaRegisteredForVideo !== currentVideoId) {
         const duration = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
         debugLog('Duration at PLAYING time: ' + duration);
@@ -186,8 +192,19 @@
           debugLog('LOAD message received');
           const videoId = loadRequestData.media.contentId;
           const title = loadRequestData.media.metadata && loadRequestData.media.metadata.title;
+
+          // Start our own real YouTube playback right away
           playVideo(videoId, title);
-          return null;
+
+          // Give CAF's own default player a real, valid, harmless
+          // placeholder to load - this is never shown/heard, it just gives
+          // the sender something legitimate to acknowledge and track a
+          // session against, instead of returning null (which the sender
+          // never learns anything from)
+          debugLog('Resolving LOAD with placeholder media for session tracking');
+          loadRequestData.media.contentId = PLACEHOLDER_URL;
+          loadRequestData.media.contentType = 'video/mp4';
+          return loadRequestData;
         }
       );
 
