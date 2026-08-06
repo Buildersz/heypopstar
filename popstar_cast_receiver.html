@@ -15,8 +15,6 @@
     #player {
       width: 100%;
       height: 100%;
-      position: relative;
-      z-index: 10;
     }
     #idle-screen {
       position: absolute;
@@ -28,28 +26,13 @@
       color: white;
       font-family: sans-serif;
       background: #0A0A0F;
-      z-index: 20;
+      z-index: 1;
     }
     #idle-screen h1 {
       background: linear-gradient(90deg, #FF2E92, #3EC1FF);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       font-size: 64px;
-    }
-    #debug-overlay {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: rgba(0,0,0,0.85);
-      color: #0F0;
-      font-family: monospace;
-      font-size: 16px;
-      padding: 10px;
-      max-height: 40%;
-      overflow-y: auto;
-      z-index: 999;
-      white-space: pre-wrap;
     }
   </style>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
@@ -61,38 +44,13 @@
     <p>Waiting for a song...</p>
   </div>
   <div id="player" style="display:none;"></div>
-  <div id="debug-overlay"></div>
 
   <script>
     let ytPlayer = null;
     let playerReady = false;
-    let pendingLoad = null;
-    let playerManager = null;
-    let currentMediaInfo = null;
-    let currentVideoId = null;
-    let currentTitle = null;
-    let mediaRegisteredForVideo = null;
-
-    // A small, real, publicly accessible placeholder video - used only so
-    // CAF's own default player has something valid to "load" and acknowledge,
-    // giving the sender a real session to track. It's never actually shown
-    // or heard - our YouTube IFrame player sits on top of it and does the
-    // real work.
-    const PLACEHOLDER_URL = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
-
-    function debugLog(msg) {
-      const el = document.getElementById('debug-overlay');
-      const time = new Date().toLocaleTimeString();
-      el.textContent += `[${time}] ${msg}\n`;
-      el.scrollTop = el.scrollHeight;
-    }
-
-    window.onerror = function(message, source, lineno, colno, error) {
-      debugLog(`JS ERROR: ${message} (line ${lineno})`);
-    };
+    let pendingVideoId = null;
 
     function onYouTubeIframeAPIReady() {
-      debugLog('YouTube API ready');
       ytPlayer = new YT.Player('player', {
         height: '100%',
         width: '100%',
@@ -103,118 +61,41 @@
         },
         events: {
           onReady: () => {
-            debugLog('YT player onReady fired');
             playerReady = true;
-            if (pendingLoad) {
-              playVideo(pendingLoad.videoId, pendingLoad.title);
-              pendingLoad = null;
+            if (pendingVideoId) {
+              playVideo(pendingVideoId);
+              pendingVideoId = null;
             }
           },
-          onStateChange: onPlayerStateChange,
-          onError: (e) => debugLog('YT player onError: ' + JSON.stringify(e.data)),
         },
       });
     }
 
-    function registerMediaWithPlayerManager(videoId, title, durationSeconds) {
-      debugLog(`Registering media: duration=${durationSeconds}s`);
-      try {
-        const mediaInfo = new cast.framework.messages.MediaInformation();
-        mediaInfo.contentId = videoId;
-        mediaInfo.contentType = 'video/youtube';
-        mediaInfo.streamType = cast.framework.messages.StreamType.BUFFERED;
-        mediaInfo.duration = durationSeconds;
-        mediaInfo.metadata = new cast.framework.messages.MovieMediaMetadata();
-        mediaInfo.metadata.title = title || 'Popstar';
-
-        currentMediaInfo = mediaInfo;
-        mediaRegisteredForVideo = videoId;
-        playerManager.setMediaInformation(mediaInfo, true);
-        debugLog('setMediaInformation call succeeded');
-      } catch (e) {
-        debugLog('setMediaInformation ERROR: ' + e.message);
-      }
-    }
-
-    function onPlayerStateChange(event) {
-      const stateNames = {'-1': 'UNSTARTED', 0: 'ENDED', 1: 'PLAYING', 2: 'PAUSED', 3: 'BUFFERING', 5: 'CUED'};
-      debugLog('YT state changed: ' + (stateNames[event.data] || event.data));
-
-      if (event.data === YT.PlayerState.PLAYING && mediaRegisteredForVideo !== currentVideoId) {
-        const duration = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
-        debugLog('Duration at PLAYING time: ' + duration);
-        if (duration && duration > 0) {
-          registerMediaWithPlayerManager(currentVideoId, currentTitle, duration);
-        }
-      }
-
-      if (!playerManager || !currentMediaInfo) {
-        debugLog('Skipping broadcast - not registered yet');
-        return;
-      }
-
-      if (event.data === YT.PlayerState.PLAYING) {
-        playerManager.broadcastStatus(true);
-        debugLog('Broadcast sent (PLAYING)');
-      } else if (event.data === YT.PlayerState.PAUSED) {
-        playerManager.broadcastStatus(true);
-        debugLog('Broadcast sent (PAUSED)');
-      } else if (event.data === YT.PlayerState.ENDED) {
-        playerManager.broadcastStatus(true);
-        debugLog('Broadcast sent (ENDED)');
-      }
-    }
-
-    function playVideo(videoId, title) {
-      debugLog('playVideo called: ' + videoId);
-      currentVideoId = videoId;
-      currentTitle = title;
+    function playVideo(videoId) {
       document.getElementById('idle-screen').style.display = 'none';
       document.getElementById('player').style.display = 'block';
-
       if (playerReady && ytPlayer) {
         ytPlayer.loadVideoById(videoId);
-        debugLog('loadVideoById called');
       } else {
-        debugLog('Player not ready yet, queuing load');
-        pendingLoad = { videoId, title };
+        pendingVideoId = videoId;
       }
     }
 
-    try {
-      const context = cast.framework.CastReceiverContext.getInstance();
-      playerManager = context.getPlayerManager();
-      debugLog('CastReceiverContext initialized');
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
 
-      playerManager.setMessageInterceptor(
-        cast.framework.messages.MessageType.LOAD,
-        (loadRequestData) => {
-          debugLog('LOAD message received');
-          const videoId = loadRequestData.media.contentId;
-          const title = loadRequestData.media.metadata && loadRequestData.media.metadata.title;
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      (loadRequestData) => {
+        const videoId = loadRequestData.media.contentId;
+        playVideo(videoId);
+        return null;
+      }
+    );
 
-          // Start our own real YouTube playback right away
-          playVideo(videoId, title);
-
-          // Give CAF's own default player a real, valid, harmless
-          // placeholder to load - this is never shown/heard, it just gives
-          // the sender something legitimate to acknowledge and track a
-          // session against, instead of returning null (which the sender
-          // never learns anything from)
-          debugLog('Resolving LOAD with placeholder media for session tracking');
-          loadRequestData.media.contentId = PLACEHOLDER_URL;
-          loadRequestData.media.contentType = 'video/mp4';
-          return loadRequestData;
-        }
-      );
-
-      const options = new cast.framework.CastReceiverOptions();
-      options.disableIdleTimeout = true;
-      context.start(options);
-      debugLog('context.start() called');
-    } catch (e) {
-      debugLog('INIT ERROR: ' + e.message);
-    }
+    const options = new cast.framework.CastReceiverOptions();
+    options.disableIdleTimeout = true;
+    context.start(options);
   </script>
 </body>
 </html>
