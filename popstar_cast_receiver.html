@@ -34,6 +34,21 @@
       -webkit-text-fill-color: transparent;
       font-size: 64px;
     }
+    #debug-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.85);
+      color: #0F0;
+      font-family: monospace;
+      font-size: 16px;
+      padding: 10px;
+      max-height: 40%;
+      overflow-y: auto;
+      z-index: 999;
+      white-space: pre-wrap;
+    }
   </style>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
@@ -44,13 +59,29 @@
     <p>Waiting for a song...</p>
   </div>
   <div id="player" style="display:none;"></div>
+  <div id="debug-overlay"></div>
 
   <script>
+    const CUSTOM_NAMESPACE = 'urn:x-cast:com.buildersz.popstar';
+
     let ytPlayer = null;
     let playerReady = false;
     let pendingVideoId = null;
+    let castContext = null;
+
+    function debugLog(msg) {
+      const el = document.getElementById('debug-overlay');
+      const time = new Date().toLocaleTimeString();
+      el.textContent += `[${time}] ${msg}\n`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    window.onerror = function(message, source, lineno, colno, error) {
+      debugLog(`JS ERROR: ${message} (line ${lineno})`);
+    };
 
     function onYouTubeIframeAPIReady() {
+      debugLog('YouTube API ready');
       ytPlayer = new YT.Player('player', {
         height: '100%',
         width: '100%',
@@ -61,17 +92,45 @@
         },
         events: {
           onReady: () => {
+            debugLog('YT player onReady fired');
             playerReady = true;
             if (pendingVideoId) {
               playVideo(pendingVideoId);
               pendingVideoId = null;
             }
           },
+          onStateChange: onPlayerStateChange,
+          onError: (e) => debugLog('YT player onError: ' + JSON.stringify(e.data)),
         },
       });
     }
 
+    function onPlayerStateChange(event) {
+      const stateNames = {'-1': 'UNSTARTED', 0: 'ENDED', 1: 'PLAYING', 2: 'PAUSED', 3: 'BUFFERING', 5: 'CUED'};
+      debugLog('YT state changed: ' + (stateNames[event.data] || event.data));
+
+      if (event.data === YT.PlayerState.ENDED) {
+        sendCustomMessage({ type: 'songEnded' });
+      } else if (event.data === YT.PlayerState.PLAYING) {
+        sendCustomMessage({ type: 'songPlaying' });
+      }
+    }
+
+    function sendCustomMessage(data) {
+      if (!castContext) {
+        debugLog('Cannot send custom message - castContext not ready');
+        return;
+      }
+      try {
+        castContext.sendCustomMessage(CUSTOM_NAMESPACE, undefined, data);
+        debugLog('Sent custom message: ' + JSON.stringify(data));
+      } catch (e) {
+        debugLog('sendCustomMessage ERROR: ' + e.message);
+      }
+    }
+
     function playVideo(videoId) {
+      debugLog('playVideo called: ' + videoId);
       document.getElementById('idle-screen').style.display = 'none';
       document.getElementById('player').style.display = 'block';
       if (playerReady && ytPlayer) {
@@ -81,21 +140,30 @@
       }
     }
 
-    const context = cast.framework.CastReceiverContext.getInstance();
-    const playerManager = context.getPlayerManager();
+    try {
+      castContext = cast.framework.CastReceiverContext.getInstance();
+      const playerManager = castContext.getPlayerManager();
+      debugLog('CastReceiverContext initialized');
 
-    playerManager.setMessageInterceptor(
-      cast.framework.messages.MessageType.LOAD,
-      (loadRequestData) => {
-        const videoId = loadRequestData.media.contentId;
-        playVideo(videoId);
-        return null;
-      }
-    );
+      playerManager.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD,
+        (loadRequestData) => {
+          debugLog('LOAD message received');
+          const videoId = loadRequestData.media.contentId;
+          playVideo(videoId);
+          return null;
+        }
+      );
 
-    const options = new cast.framework.CastReceiverOptions();
-    options.disableIdleTimeout = true;
-    context.start(options);
+      const options = new cast.framework.CastReceiverOptions();
+      options.disableIdleTimeout = true;
+      options.customNamespaces = {};
+      options.customNamespaces[CUSTOM_NAMESPACE] = cast.framework.system.MessageType.JSON;
+      castContext.start(options);
+      debugLog('context.start() called');
+    } catch (e) {
+      debugLog('INIT ERROR: ' + e.message);
+    }
   </script>
 </body>
 </html>
