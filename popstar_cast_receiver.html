@@ -135,7 +135,9 @@
       document.getElementById('player').style.display = 'block';
       if (playerReady && ytPlayer) {
         ytPlayer.loadVideoById(videoId);
+        debugLog('loadVideoById called');
       } else {
+        debugLog('Player not ready yet, queuing load');
         pendingVideoId = videoId;
       }
     }
@@ -148,7 +150,7 @@
       playerManager.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
         (loadRequestData) => {
-          debugLog('LOAD message received');
+          debugLog('LOAD message received, videoId=' + loadRequestData.media.contentId);
           const videoId = loadRequestData.media.contentId;
           playVideo(videoId);
           return null;
