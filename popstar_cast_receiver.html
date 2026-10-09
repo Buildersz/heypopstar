@@ -150,9 +150,16 @@
       playerManager.setMessageInterceptor(
         cast.framework.messages.MessageType.LOAD,
         (loadRequestData) => {
-          debugLog('LOAD message received, videoId=' + loadRequestData.media.contentId);
-          const videoId = loadRequestData.media.contentId;
-          playVideo(videoId);
+          const media = loadRequestData.media || {};
+          let videoId = media.contentId;
+          if (!videoId || videoId === 'undefined') {
+            // iOS Cast SDK sends contentUrl instead of contentId
+            const url = media.contentUrl || media.entity || '';
+            const m = url.match(/[?&]v=([\w-]{11})/) || url.match(/youtu\.be\/([\w-]{11})/);
+            videoId = m ? m[1] : null;
+          }
+          debugLog('LOAD received, videoId=' + videoId + ' (contentId=' + media.contentId + ', contentUrl=' + media.contentUrl + ')');
+          if (videoId) playVideo(videoId);
           return null;
         }
       );
