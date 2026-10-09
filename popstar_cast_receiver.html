@@ -34,21 +34,6 @@
       -webkit-text-fill-color: transparent;
       font-size: 64px;
     }
-    #debug-overlay {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: rgba(0,0,0,0.85);
-      color: #0F0;
-      font-family: monospace;
-      font-size: 16px;
-      padding: 10px;
-      max-height: 40%;
-      overflow-y: auto;
-      z-index: 999;
-      white-space: pre-wrap;
-    }
   </style>
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
@@ -59,7 +44,6 @@
     <p>Waiting for a song...</p>
   </div>
   <div id="player" style="display:none;"></div>
-  <div id="debug-overlay"></div>
 
   <script>
     const CUSTOM_NAMESPACE = 'urn:x-cast:com.buildersz.popstar';
@@ -70,10 +54,7 @@
     let castContext = null;
 
     function debugLog(msg) {
-      const el = document.getElementById('debug-overlay');
-      const time = new Date().toLocaleTimeString();
-      el.textContent += `[${time}] ${msg}\n`;
-      el.scrollTop = el.scrollHeight;
+      console.log('[Popstar] ' + msg);
     }
 
     window.onerror = function(message, source, lineno, colno, error) {
